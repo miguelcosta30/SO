@@ -7,454 +7,976 @@
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
-#include <fcntl.h>
-#include <apue.h>
-#define BUF_SIZE 4096
-
-int *mergesort_run(int *a, int n , int lo, int hi);
-void merge_array(int *a, int *aux, int lo, int mid, int hi);
-void mergesort_recursivo(int *a, int *aux, int lo, int hi);
-int  readIntsN(char * filename);
-int *readInts(char*filename, int *a);
-int uniform(int val_min, int val_max);
-void printArray(const int* a, int N);
-int * newIntArray(int M); // alloc new int arrayvoid freeIntArray(int * v); // frees new int array
-int uniformArray(int * a, int N, int val_min, int val_max); // function to fill an array with integer random uniformly distributed values (returns -1 if error)
-int writeInts(char * filename, int * a, int n);
-
-void handler(int signal_number);
-int * SwitchArray( int *a,int div, int lo, int hi);
-int *SwitchArrayFather(int *a, int *aux, int lo, int hi);
-char *vetortoString(int *vetor,char *string,int N);
-int *stringToarray(int *a, char *string);
-
-int main(int argc, char *argv[]) {
-    int min, max;
-    int N;
-    int *a;
-    int M, i;
-    int fds[2];
-    
-     int n;
-   
-
-    
-
-//INSTALACÃO DO SINAL    
-struct sigaction sa;
-sa.sa_handler = &handler;
-sa.sa_flags= SA_RESTART;
-sigaction(SIGUSR1, &sa, NULL);
-sigaction(SIGUSR2, &sa, NULL); //È SEMPRE IGUAL
+#include <sys/stat.h>
+#include <pthread.h>
+#include <dirent.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <ctype.h>
+#include <semaphore.h>
 
 
-    printf("Quantos filhos deseja criar para a divisão?\n");
-    scanf("%d", &M);
+#define N 10
+#define NCons 3
 
-    
 
-    N=readIntsN(argv[1]);
-    a = newIntArray(N); //Alocação para array de size N.
-    printf("\nArray gerado:");
-    a=readInts(argv[1],a);
-    printf("\n");
-    //printArray(a,N);
+char buf[N][300];
+int prodptr=0, consptr=0;
+pthread_mutex_t trinco_p = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t trinco_c = PTHREAD_MUTEX_INITIALIZER;
 
+
+static const char *semNameProd = "semPodeProd";
+sem_t semPodeProd;
+static const char *semNameCons = "semPodeCons";
+sem_t semPodeCons;
+ sem_t NoDirs;
+
+
+
+int name = 0, iname = 0, type = 0, empty = 0, exec = 0, modify = 0, size = 0,args; //Flags para os parametros da funcao find (0->Nao contem este argumento/1->Contem este argumento);
+int dirFlag=0, globalMatchs=0;
+int countDirProd=0, countDirCons=0;
+
+typedef struct thread_data{ //Estrutura de tarefas  onde cada tarefa tem o seu path para executar a funcao.
+	pthread_t  thread_id; //Id da tarefa
+  char *base_path;
+}T_DATA;
+
+struct argcmd //Lista ligada de argumentos
+{
+  char *arg;
+  char *argvalue;
+  struct argcmd *nextarg;
+};
+
+typedef struct strings          //lista de path's
+{
+  char *name;
+  struct strings *next;
  
+}STRINGS;
+
+typedef struct threadmatch      //Lista ligada de threads que encontraram path's
+{
+  pthread_t  thread_id; 
+  int matches;
+   struct strings *firstString;
   
+  struct threadmatch *next;
+}THREADMATCHS;
 
-    do{
-        int *pids;
-         pids = newIntArray(M); //Alocação para o array de filhos.
-        
-        pipe(fds);
+int countargs(char *string);
+void *DirAndStacsCons(void *string);
+void *DirAndStacsProd(void *string);
+void *print_msg(void *unused);
+int *newIntArray(int M);
+void argumnets(char *string);
+void insertargs(struct argcmd **head, char *new_arg, char *new_argval);
+void printListArgs(struct argcmd *node);
+void insertargs_tolist(char *string);
+int find_name(struct argcmd *head, char *filename);
+int find_iname(struct argcmd *head, char *filename);
+char *minuscula(char *string);
+int find_bysize(struct argcmd *head, float sizebytes);
+int find_typehelper(struct argcmd *head);
+int nodecount(struct argcmd *head);
+int find_byempty(char *base_path);
+void inserthreads(struct threadmatch **head, struct threadmatch *no,long int id,char *path);
+void inserthreadspath(struct threadmatch *no,long int id,char *path);
+void printListArgshelp();
+int compareNameLeft(char *argname, char*filename);
+int compareNameRight(char *argname, char*filename);
+int find_bynmin(struct argcmd *head, time_t tmin);
+void *DirAndStacs(char *string);
 
-        int div = N / M, divCheck= N%M;
-        for (i=0; i < M; i++) { 
-                                   //CRIAÇÃO DE M FILHOS
-        if((pids[i]=fork())==-1){
-	    perror("Erro");
-        printf("Erro ao criar o filho");
-	    exit(1);
-        }
-    //CODIGO DE TODOS DOS FILHOS
-        if(pids[i]==0){
-        if(divCheck!=0)                                                                                  //Para uma divisao decimal, o ultimo filho vai ordenar +1 elemento que os outros
-        {
-            if (i == M-1) {
-                    close(fds[0]);
-                    
-                    int intervalo=N-(div*i);                                                            //Filho feicha o lado de leitura do pipe pois nao vai necessitar dele.
-                    int *aux;
-                    char *msg;
-                    int size;
-                    aux = newIntArray(intervalo);
-                    aux = SwitchArray(a, intervalo, div * i, N-1);
-                    aux = mergesort_run(aux, intervalo,0,intervalo-1);
-                    
-                    msg = (char*) malloc(((((intervalo+1)*2)*1000)*sizeof(char))+1);  
-                    sprintf(msg, "PID:%d*lo:%d;hi:%d*", getpid(), div*i,N-1 );                 
-                    char *string;
-                    string = (char*) malloc(((((div*2)*1000)*sizeof(char))+1));
-                    string = vetortoString(aux,string,intervalo);
-                    strcat(msg,string);
-                   
-                    size=strlen(msg);
-                    msg[size+1]='\0'; 
-                    writen(fds[1], msg, strlen(msg));
-                    
-                close(fds[1]);
-                exit(EXIT_SUCCESS);
+struct argcmd *Head = NULL;             
+struct threadmatch *HeadThreds=NULL;
+pthread_mutex_t lock ;
 
-            } else {
-                    
-                    close(fds[0]);
-                    char *msg;
-                    int *aux;
-                    int size;
-                    aux= newIntArray(div);                                                                              //Filho feicha o lado de leitura do pipe pois nao vai necessitar dele.
-                    aux =  SwitchArray(a, div, div * i, (div * i) + (div - 1));
-                    aux= mergesort_run(aux, div ,0, div-1);
-               
-                  
-                        msg = (char*) malloc((((div*2)+1000)*sizeof(char))+1); 
-                        sprintf(msg, "PID:%d*lo:%d;hi:%d*", getpid(), div*i, (div*i)+(div-1));
-                        char *string;
-                        string = (char*) malloc(((((div*2)*1000)*sizeof(char))+1));
-                        string = vetortoString(aux,string,div);
-                        
-                        strcat(msg,string);
-                        size=strlen(msg);
-                        msg[size+1]='\0'; 
-                        writen(fds[1], msg, strlen(msg));
-                    
-                   
-                    close(fds[1]);
-                    exit(EXIT_SUCCESS);
-            }
-        } 
-            else {
-                close(fds[0]); 
-                char *msg;                                                                 //Filho feicha o lado de leitura do pipe pois nao vai necessitar dele.
-                int *aux;   
-                int size;                                                             
-                aux= newIntArray(div);                                                     //Alocaçao de espaço para o SubArray do Filho
-                aux = SwitchArray(a, div, div * i, (div * i) + (div - 1));                 //SubArray do filho corta o array original do pai
-                aux=  mergesort_run(aux, div,0, div-1);                                    //Ordenação desse subArray
-               
-        
-                    msg = (char*) malloc((((div*2)*1000)*sizeof(char))+1);                 //Alocação de memoria para a string protocolo final        
-                    sprintf(msg, "PID:%d*lo:%d;hi:%d*", getpid(), div*i, (div*i)+(div-1));  //Escreve mensagem na string
-                    char *string;                           
-                    string = (char*) malloc(((div*2)*1000)*sizeof(char));                   //Alocaçao de espaço para uma string 2x maior que o array (devido as virgulas)
-                    string = vetortoString(aux,string,div);                                    //Funcao que converte vetor para string
-                                    
-                    strcat(msg,string);  
-                    size=strlen(msg);
-                    msg[size+1]='\0'; 
-                    printf("%s\n",msg);                                                                    //Junção da string com a msg de protocolo
-                    writen(fds[1], msg, strlen(msg));                                     //Envia essa mensagem pelo pipe
-                   
-                   
-                close(fds[1]);
-                
-                exit(EXIT_SUCCESS);
-               
-                    }
-
-        }
-        }
-    
-    close(fds[1]);                                                                             //Pai fecha o lado de escrita
-    int pid, lo, hi , sizeArray;                                                                
-     char *buf;
-    buf=(char*) malloc(BUF_SIZE*sizeof(char)); 
-    char *buf2;
-    buf2= (char*) malloc(10000000*sizeof(char)); 
-    ssize_t bytes;
-    int count=0;
-    int count1=0;
-   int counterFilhos=0;
+int main(int argc, char *argv[])
+{
   
-    while((bytes = readn(fds[0], buf, BUF_SIZE))!=0)
-{
-     strcat(buf2,buf); 
-}
-    //printf("%s",buf2);
-    char *msg, *msgsave;
-	msg = strtok_r(buf2,"|",&msgsave);
-	while(msg!=NULL && count1<M)
-{
- 
-    printf("\n");
-   // writen(1, msg, strlen(msg));
-    //printf("\n");
-   sscanf(msg, "%*[^0123456789]%d%*[^0123456789]%d%*[^0123456789]%d",&pid, &lo, &hi);
-    sizeArray= (hi-lo)+1;
-    printf("\tTamanho de array:%d\n",sizeArray);
-    char *msg1, *msg1save;
-    
-     msg1= strtok_r(msg,"*",&msg1save);
-    count=0;
-		while (msg1!=NULL)
-        {
-            
-            count++;
-             if(count==3)
-        {
-            int *paux;
-            paux=newIntArray(sizeArray);
-            char *stringVetor;
-            stringVetor = (char*) malloc(((sizeArray*1000)*sizeof(char))+1);
-            strcpy(stringVetor,msg1);
-           // printf("\n%s\n",stringVetor);  
-            paux=stringToarray(paux,stringVetor);
-            a= SwitchArrayFather(a,paux,lo,hi);
-             counterFilhos++;
-        }
-        msg1=strtok_r(NULL,"*",&msg1save);
-        }
+  char *cmd = malloc(sizeof(char) * 300);
+  char *path = malloc(sizeof(char) * 300);
+  char *pathhelp = malloc(sizeof(char) * 300);
+  char *specs = malloc(sizeof(char) * 300);
+  char *specshelp = malloc(sizeof(char) * 300);
 
-		msg = strtok_r(NULL, "|",&msgsave);
-        count1++;
-}
 
     
 
-printf("Numero de filhos=%d\n",counterFilhos);
+  pthread_t thread_idProd;
+  pthread_t thread_idCons[NCons];
+   pthread_t tid_state;
+  sem_init(&semPodeProd,0,N); //Semaforo dos produtores começa a N pois é o tamanho do Array
+  sem_init(&semPodeCons,0,0); //Semaforo dos consumidores começa a 0 pois têm de esperar pelor diretorios do produtor
+  sem_init(&NoDirs,0,0);
 
-   
-   int pid1=-1;
-    int status;
-    for(i=0; i < M; i++)
+
+  struct thread_data  mainthread_args;
+  printf("find ");
+  fgets(cmd, 300, stdin);
+  strtok(cmd,"\n");
+  args = countargs(cmd); //Funcao para saber quantos argumentos sao
+  argumnets(cmd);
+  char *token;
+  token = strtok(cmd, " ");
+  int count = 1;
+  while (token != NULL) //Descodificar a string
+  {
+    if (count == 1) //A primeira palavra é sempre o caminho
     {
-     pid1=waitpid(pids[i], &status, 0); //Pai espera pela finalização dos filhos
-     }
-    
-    free(pids);
-    M=M/2;
-    }while(M!=0);
-                            
-    printf("Array do pai:\n");
-    printArray(a,N);
-    writeInts("ArrayPaiTemp.txt",a,N);
-    printf("\nTamanho: %d\n",N);
-    return 0;
-}
-int readIntsN(char*filename){
-
-            FILE *fp;
-           char *buf;
-            buf=(char*) malloc(BUF_SIZE*sizeof(char)); 
-            int counter=0;
-            char *stringVetor;
-            stringVetor = (char*) malloc(1000000*sizeof(char));
-            fp = fopen(filename, "r");
-            if (fp == NULL){
-                printf("Erro ao abrir o ficheiro: %s",filename);
-            
-            }
-            while (fgets(buf, BUF_SIZE , fp) != NULL){
-                //printf("%s\n", buf);
-                strcat(stringVetor,buf);
-                }
-            char *token;
-           token=strtok(stringVetor,",");
-           while(token!=NULL)
-           {
-               counter++;
-               token=strtok(NULL,",");
-           }
-           
-            fclose(fp);
-           
-           return counter;
-        }
-
-int *readInts(char*filename,int *a){
-
-           FILE *fp;
-           char *buf;
-            buf=(char*) malloc(BUF_SIZE*sizeof(char)); 
-            int counter=0;
-            char *stringVetor;
-            int i=0;
-            int num;
-            stringVetor = (char*) malloc(1000000*sizeof(char));
-            fp = fopen(filename, "r");;
-            if (fp == NULL){
-                printf("Erro ao abrir o ficheiro: %s",filename);
-            
-            }
-            while (fgets(buf, BUF_SIZE , fp) != NULL)
-                {
-                    strcat(stringVetor,buf);
-                }
-            char *token;
-            token=strtok(stringVetor,",");
-           while(token!=NULL)
-           {
-               num=atoi(token);
-               a[i]=num;
-               i++;
-               token=strtok(NULL,",");
-           }
-
-fclose(fp);
-        return a;
-                  }
-               
-                
-                
-           
-
-
-
-void printArray(const int  *a, int  N) {
-    int i;
-    for (i = 0; i < N; i++) {
-        printf("%d ", *(a+i));
+      strcpy(path, token);
     }
-    printf("\n");
-}
-int uniform(int  val_min, int val_max) {
-    return val_min + rand() % (val_max - val_min + 1);
-}
-int  uniformArray(int *a, int N, int val_min, int  val_max) {
-    int i;
-    for (i = 0; i < N; i++) {
-        a[i] = uniform(val_min, val_max);
-    }
-    return *a;
-}
-int writeInts(char *filename, int *a, int N) {
-    FILE *fp;
-    int i = 0;
     
-    fp = fopen(filename, "w");
-    if (fp != NULL) {
-        while (i < N){
-            fprintf(fp, "%d", a[i++]);
-            fprintf(fp, ",");} //Separação entre virgulas;
-        fclose(fp);
-    } else
+    else //Junta todos os argumentos numa string de argumentos
     {
-        printf("Erro na abertura do ficheiro");
-        return -1; // erro na leitura do ficheiro
+      strcat(specs, token);
+      //strcat(specs, specshelp);
+      strcat(specs, " ");
     }
-    return 0;
-}
+    count++;
+    token = strtok(NULL, " ");
+  }
 
-int *newIntArray(int  M) {
-    return (int*) malloc(sizeof(int) * M);
-}
-void merge_array(int*a, int*aux, int  lo, int mid, int hi) {
-    int k;
-    for (k = lo; k <= hi; k++)
-        *(aux+k) = *(a+k);
-    int i = lo, j = mid+1;
-    for (k = lo; k <= hi; k++) {
-        if (i > mid) *(a+k) = *(aux+(j++));
-        else if (j > hi) *(a+k) = *(aux+(i++));
-        else if (*(aux+j) < *(aux+i)) *(a+k) = *(aux+(j++));
-        else *(a+k) = *(aux+(i++));
-    }
-}
-
-void mergesort_recursivo(int *a, int *aux, int lo, int hi) {
-    if (hi <= lo) return;
-    int mid = lo + (hi - lo) / 2;
-    mergesort_recursivo(a, aux, lo, mid);
-    mergesort_recursivo(a, aux, mid+1, hi);
-    merge_array(a, aux, lo, mid, hi);
-}
-
-int *mergesort_run(int *a, int n , int lo, int hi) {
-    int  * aux;
-    aux = malloc(sizeof(int) *n);
-    mergesort_recursivo(a, aux, lo, hi);
-    free(aux);
-    return a;
-}
-void handler(int signal_number)
-{
-	switch(signal_number)	{//IRA PERGUNTAR O TEMPO PARA FAZER A DIFERENÇA
-		case SIGUSR1:
-			printf("SIGUSR1\n");
-			 
-			break;
-
-		case SIGUSR2:
-			printf("SIGUSR2\n");
- 		
-			break;
-			
-		default:
-			printf("Signal %d", signal_number);
-			break;
-}
-}
-int *SwitchArray(int *a,int div, int lo, int hi)
-{
-    int *b;
-    b= newIntArray(div);
-    int i,j=0;
-
-    for(i=lo; i<=hi;i++)
+  if (strcmp(path, ".") == 0) //Se for um ponto quer dizer queé o diretorio onde se encontra no momento.
+  {
+    getcwd(path, 300);
+    strcat(path,"/");
+  }
+   if(strstr(path,"."))     //Se for . + nome (./ProjetoSO2)
    {
-      b[j]=a[i];
-       j++;
-   }
-   return b;
-}
-int *SwitchArrayFather(int *a, int *aux, int lo, int hi)
-{
-    int i,j=0;
-    for(i=lo;i<=hi;i++)
+    int i;
+    int j=1;
+    for(i=0;path[i]!='\0';i++)
     {
-        a[i]=aux[j];
+        pathhelp[i]=path[j];
         j++;
     }
-    return a;
-}
-char *vetortoString(int *vetor,char *string,int N)
-{
-    char *string1;
-    string1= (char*) malloc(4096*sizeof(char)); 
+    pathhelp[i]='\0';
+    printf("%s\n",pathhelp);
+    getcwd(path, 300);
+    strcat(path,pathhelp);
+   }
+
+
+ 
+  insertargs_tolist(specs);
+  mainthread_args.base_path= malloc(sizeof(char)*300);   
+  strcpy(mainthread_args.base_path,path);
+
+  pthread_create(&thread_idProd, NULL, DirAndStacsProd, &mainthread_args); //tarefa produtora é chamada para utilizar esta funcao de produzir
   
-    int i;
-    int num;
-    for( i=0; i<N;i++)
+
+for(int i=0; i<NCons; i++)
+{
+  pthread_create(&thread_idCons[i], NULL, DirAndStacsCons, NULL);     //Sao lançadas N tarefas consumidoras 
+}
+  
+  sem_wait(&NoDirs);                            //Enquanto 1 produtor nao incrementar o semaforo dos diretorios o produtor nao acaba
+  pthread_join(thread_idProd, NULL);
+
+  printListArgshelp();
+
+ // printf("Cons-> %d , Prod-> %d \n", countDirCons,countDirProd);
+
+  return 0;
+}
+
+
+int countargs(char *string)
+{
+  int i = 0;
+  int args = 0;
+
+  while (string[i] != '\0')
+  {
+    if (string[i] == ' ')
     {
-        num=vetor[i];
-        sprintf(string1,"%d",num);
-       
-        if( i==N-1)
+
+      args++;
+    }
+    i++;
+  }
+
+  args++;
+  return args;
+}
+
+void *DirAndStacsProd(void *string)
+{
+   
+  struct thread_data *my_data;
+  my_data= (struct thread_data *) string;
+
+  char *currentDir=malloc(sizeof(char)*300);
+  char *path=malloc(sizeof(char)*300);
+  strcpy(currentDir,my_data->base_path);
+  DIR *dir;
+  struct dirent *entry;
+  pthread_t thread_id;
+  struct stat file_stat;
+          
+  if(dirFlag==0)
+          {
+            sem_wait(&semPodeProd);
+          pthread_mutex_lock(&trinco_p);
+            strcpy(buf[prodptr],currentDir);
+            //printf("[%ld]->%s\n",pthread_self(),buf[prodptr]);
+            prodptr = (prodptr+1) % N; 
+           
+             dirFlag++;
+              pthread_mutex_unlock(&trinco_p);
+          sem_post(&semPodeCons);
+          }
+
+
+  if ((dir = opendir(my_data->base_path)) == NULL)
+    perror("Error");
+  else
+  {
+    // printf("Thread id: %ld\n",pthread_self());
+    //printf("Inside %s\n",my_data->base_path);
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+      sprintf(path, "%s%s",my_data->base_path, entry->d_name);
+      
+      if (stat(path, &file_stat) == 0) 
+      {
+        if (S_ISDIR(file_stat.st_mode) && (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)) //Apenas diretorios
         {
-            strcat(string,string1);
-            strcat(string,"|");
-        } else{
-            strcat(string,string1);
-            strcat(string,",");}
+       
+
+       
+          T_DATA thread_data;   
+          strcat(path,"/");
+          thread_data.base_path= malloc(sizeof(char)*300);   
+          strcpy(thread_data.base_path,path);
+         
+          sem_wait(&semPodeProd);
+          pthread_mutex_lock(&trinco_p);
+       
+
+          strcpy(buf[prodptr],path);                           //Funcao que coloca um novo diretorio no buffer
+         //printf("[%ld]->%s\n",pthread_self(),buf[prodptr]);
+          prodptr = (prodptr+1) % N;  
+         
+          pthread_mutex_unlock(&trinco_p);
+          sem_post(&semPodeCons);
+
+          DirAndStacsProd(&thread_data);                      //Recursividade até nao existir mais diretorios
+       
+        }
+
+      }  
+      strcpy(path, "");
+   
+    }
+    closedir(dir);
+  
+}
+countDirProd++;
+  return 0;
+}
+
+void *DirAndStacsCons(void *string)
+{
+
+
+
+while(1){
+        
+        char *path=malloc(300*sizeof(char));
+        sem_wait(&semPodeCons);
+        
+        pthread_mutex_lock(&trinco_c);
+        countDirCons++;
+            strcpy(path,buf[consptr]);
+        // printf("[%ld]=%s\n",pthread_self(),path);
+        
+           strcpy(buf[consptr],"");
+          DirAndStacs(path);
+          consptr = (consptr+1) % N;
+        pthread_mutex_unlock(&trinco_c);
+          
+        sem_post(&semPodeProd);
+
+        
+    }
+
+
+
+
+  return 0;
+  
+}
+
+void *DirAndStacs(char *string)
+{
+
+  DIR *dir;
+  struct dirent *entry;
+  struct stat file_stat;
+  char *path = malloc(sizeof(char) * 300);
+
+
+  if ((dir = opendir(string)) == NULL)
+    perror("Error");
+  else
+  {
+    
+    while ((entry = readdir(dir)) != NULL)
+    {
+        int flag=0;
+
+
+      sprintf(path, "%s%s",string, entry->d_name);
+
+      if (stat(path, &file_stat) == 0)
+        
+      {
+        if (S_ISDIR(file_stat.st_mode) && (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)) //Apenas diretorios
+        {
+
+          if (name == 1)
+          {
+            if (find_name(Head, entry->d_name) == 1)
+            {
+              flag++;    
+            }
+          }
+
+          if (iname == 1)
+          {
+            if (find_iname(Head, entry->d_name) == 1)
+            {
+              flag++;
+            }
+          }
+           if (type == 1)
+          {
+            if(find_typehelper(Head)==1)
+            {
+            flag ++;
+            }
+          }
+           if (size == 1)
+          {
+            if(find_bysize(Head, file_stat.st_size) == 1)
+            {
+            
+            flag++;
+            }
+          }
+           if (modify == 1)
+          {
+            
+            if(find_bynmin(Head, file_stat.st_mtime)==1)
+            {
+              flag++;
+            }
+            
+          }
+           if (exec == 1)
+          {
+            if((file_stat.st_mode & S_IXUSR) && (file_stat.st_mode & S_IXGRP) && (file_stat.st_mode & S_IXOTH))
+            {
+              flag++;
+            }
+            
+          }
+          if( empty==1)
+          {
+            if(find_byempty(path)==1)
+                {
+                  flag ++;
+                }
+          }
+
+          if(flag==nodecount(Head)) //Caso o diretorio respeite todas especificaçóes entao foi encontrado.
+          {
+           
+            long int id=pthread_self();
+            inserthreads(&HeadThreds, HeadThreds,id,path);
+            
+           
+          }
+
+          
+        }
+        
+        
+        if ((strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0)&& !S_ISDIR(file_stat.st_mode))  //Apenas para ficheiros
+        {
+
+          if (name == 1)
+          {
+
+            if (find_name(Head, entry->d_name) == 1)
+            {
+              flag++;    
+            }
+          }
+
+          if (iname == 1)
+          {
+            if (find_iname(Head, entry->d_name) == 1)
+            {
+              flag++;
+            }
+          }
+          if( empty==1)
+          {
+                if(find_byempty(path)==1)
+                {
+                  flag ++;
+                }
+          }
+          if (type == 1)
+          {
+             if(find_typehelper(Head)==2)
+            {
+              flag ++;
+            }
+          }
+           if (modify == 1)
+          {
+            if(find_bynmin(Head, file_stat.st_mtime)==1)
+            {
+              flag++;
+            }
+          }
+          if (exec == 1)
+          {
+            if((file_stat.st_mode & S_IXUSR) && (file_stat.st_mode & S_IXGRP) && (file_stat.st_mode & S_IXOTH))
+            {
+              flag++;
+            }
+          }
+          if (size == 1)
+          {
+            if(find_bysize(Head, file_stat.st_size) == 1)
+            {
+            flag++;
+            }
+          }
+          if(flag==nodecount(Head)) //Caso o ficheiro respeite todas especificaçóes entao foi encontrado.
+          {
+           
+           long int id=pthread_self();
+          inserthreads(&HeadThreds, HeadThreds,id,path);
+           
+          }
+         // goto end;
+        }
+      }
+    
+    //end:
+      strcpy(path, "");
+    }
+    closedir(dir);
+  }
+if(countDirProd==countDirCons)          //Se o numero de diretorios do produtor for igual ao numero de diretorios do produtor significa que nao existe mais diretorios a serem procurados 
+{
+  sem_post(&NoDirs);
+}
+  return 0;
+}
+
+
+void argumnets(char *string)
+{
+  if (strstr(string, "-name"))
+  {
+    name = 1;
+  }
+  if (strstr(string, "-iname"))
+  {
+    iname = 1;
+  }
+  if (strstr(string, "-type"))
+  {
+    type = 1;
+  }
+  if (strstr(string, "-empty"))
+  {
+    empty = 1;
+  }
+  if (strstr(string, "-executable"))
+  {
+    exec = 1;
+  }
+  if (strstr(string, "-mmin"))
+  {
+    modify = 1;
+  }
+  if (strstr(string, "-size"))
+  {
+    size = 1;
+  }
+
+  printf("%d,%d,%d,%d,%d,%d,%d\n", name, iname, type, empty, exec, modify, size);
+}
+
+
+
+
+
+void insertargs(struct argcmd **head, char *new_arg, char *new_argval)      //Funcao para colocar os valores na linked list
+{
+  struct argcmd *new_node = (struct argcmd *)malloc(sizeof(struct argcmd));
+
+  new_node->arg = (char *)malloc(sizeof(char) * 300);
+  new_node->arg = new_arg;
+  new_node->argvalue = (char *)malloc(sizeof(char) * 300);
+  new_node->argvalue = new_argval;
+  new_node->nextarg = *head;
+  *head = new_node;
+}
+
+void printListArgs(struct argcmd *node)
+{
+  while (node != NULL)
+  {
+    printf("%s %s\n", node->arg, node->argvalue);
+    node = node->nextarg;
+  }
+}
+
+void insertargs_tolist(char *string)                    //Funcao que coloca os valores na lista
+{
+  char *arg = malloc(sizeof(char) * 30);
+  char *token;
+  int flag=0;
+  int count = 0;
+  token = strtok(string, " ");
+  while (token != NULL)
+  {
+
+    count++;
+    if ((count % 2) != 0)     //Se for impar é um argumento
+    {
+
+      strcpy(arg, token);
+
+       if(strcmp(arg,"-empty")==0 || strcmp(arg,"-executable")==0)    //Se for o executable e o empty, como apenas têm 1 argumentos, reseta o count
+      {
+         count=0;     
+         char *arg_ = malloc(sizeof(char) * 30);
+       char *argval = malloc(sizeof(char) * 30);
+      strcpy(arg_, arg); 
+      strcpy(argval, "-");
+      insertargs(&Head, arg_, argval);
+   
+      }
+      
+
+      token = strtok(NULL, " ");
+       
+    }
+    else                          //Se for par é o valor do argumento 
+    { 
+      char *arg_ = malloc(sizeof(char) * 30);
+      char *argval = malloc(sizeof(char) * 30);
+      strcpy(arg_, arg); 
+      strcpy(argval, token);
+      insertargs(&Head, arg_, argval);
+      flag=0;
+      token = strtok(NULL, " ");
+      }
+    
+  }
+}
+
+int find_name(struct argcmd *head, char *filename)
+{
+
+char *left=malloc(sizeof(char)*300);
+int count=0;
+  struct argcmd *current = head;
+   char *arg= malloc(sizeof(char) * 30);
+  while (current != NULL)
+  {
+     if (strcmp(current->arg, "-name") == 0)
+    {
+      
+   if(strstr(current->argvalue,"'*")) //Asterisco lado esquerdo
+    {
+      strcpy(arg,current->argvalue);
+        char *token, *tokensave;
+        token=strtok_r(arg,"'",&tokensave);
+        {
+          count=0;
+          while(token!=NULL)
+          {
+             if( compareNameRight(token,filename)==1)
+       {
+         return 1;
+       }
+            token=strtok_r(NULL,"'",&tokensave);
+          }
+        }
+    }
+    if(strstr(current->argvalue,"*'")) //asterisco lado direito
+    {
+        strcpy(arg,current->argvalue); 
+        char *token, *tokensave;
+        token=strtok_r(arg,"'",&tokensave);
+        {
+          while(token!=NULL)
+          {
+            if( compareNameLeft(token,filename)==1)
+       {
+         return 1;
+       }
+            token=strtok_r(NULL,"'",&tokensave);
+          }
+        }
+    }
+    if (strcmp(current->argvalue, filename) == 0)     //Se nao tiver asterisco compara o nome todo
+    {
+      return 1;
+    }
+    }
+
+    current = current->nextarg;
+  }
+  return 0;
+}
+
+int compareNameLeft(char *argname, char*filename)
+{
+   //printf("%s|%s\n",argname,filename);
+int i;
+int count=0;
+for(i=0; i<strlen(argname)-1;i++)
+{
+  if(filename[i]==argname[i])
+  {
+    count ++;
+  }
+}
+if(count==strlen(argname)-1)
+{
+  return 1;
+}
+return 0;
+}
+
+int compareNameRight(char *argname, char*filename)
+{
+//printf("%s|%s\n",argname,filename);
+int j=strlen(filename)-1;
+int i;
+int count=0;
+for(i=strlen(argname)-1; i>0;i--)
+{
+ 
+    if(filename[j]==argname[i])
+  {
+   
+    count ++;
+  }
+  j--;
+  
+  
+}
+if(count==strlen(argname)-1)
+{
+  return 1;
+}
+return 0;
+}
+
+int find_iname(struct argcmd *head, char *filename)
+{
+
+  struct argcmd *current = head;
+
+  while (current != NULL)
+  {
+
+    if (strcmp(current->arg, "-iname") == 0)
+    {
+
+      char *argval = malloc(sizeof(char) * 30);
+      argval = current->argvalue;
+      argval = minuscula(argval);
+      filename = minuscula(filename);
+
+      if (strcmp(argval, filename) == 0)      //Compara ambas as strings minusculas 
+      {
+
+        return 1;
+      }
+    }
+    current = current->nextarg;
+  }
+  return 0;
+}
+
+char *minuscula(char *string) //Funcao que transforma qlq elemento de string para minusculo
+{
+  int i;
+  char *string1 = malloc(sizeof(char) * 300);
+  char c, result;
+  for (i = 0; string[i] != '\0'; i++)
+  {
+
+    c = string[i];
+    result = tolower(c);
+    strncat(string1, &result, 1);
+  }
+  //printf("%s\n",string);
+  return string1;
+}
+
+int find_bynmin(struct argcmd *head, time_t tmin)
+{
+
+time_t t= time(NULL);
+struct tm tm=*localtime(&t); //Tempo atual
+                                   
+time_t tfile=tmin;
+tm=*localtime(&tfile);     //Tempo da modificaçao do ficheiro
+                      
+double seconds= difftime(t,tmin);   //Quantidade de segundos de diferença entre o tempo atual e o de modificaçao
+double minutes= seconds/60.0;       //Transformar em minutos
+
+struct argcmd *current = head;
+
+  while (current != NULL)
+  {
+    if (strcmp(current->arg, "-mmin") == 0)
+    {
+     double minutos;
+      sscanf(current->argvalue, "%*[^0123456789]%lf",&minutos); //Numero de minutos passados pelo utilizador
+     
+      if(minutes<minutos)
+      {
+        
+        return 1;
+      }
+    }
+    current = current->nextarg;
+  }
+
+return 0;
+
+}
+
+int find_bysize(struct argcmd *head, float sizebytes)
+{
+float sizemb=sizebytes/1000000; //Tamanho do ficheiro em mega bytes
+
+struct argcmd *current = head;
+float sizebyuser;
+  
+  while (current != NULL)
+  {
+
+    if (strcmp(current->arg, "-size") == 0)
+    {
+      sscanf(current->argvalue, "%*[^0123456789]%f",&sizebyuser); //Numero de butes passados pelo utilizador
+      
+          if(strstr(current->argvalue,"+"))     //Se tiver um +
+          {
+            
+                  if(sizemb>sizebyuser)
+                  {
+                    return 1;
+                  }
+          }
+          if(strstr(current->argvalue,"-"))       //Se tiver um -
+          {
+              if(sizemb<sizebyuser)
+                  {
+                    return 1;
+                  }
+          }
+    }
+    current = current->nextarg;
+  }
+  return 0;
+}
+
+
+
+
+int find_typehelper(struct argcmd *head)
+{
+
+  struct argcmd *current = head;
+
+  while (current != NULL)
+  {
+
+    if (strcmp(current->arg, "-type") == 0)
+    {
+
+      if(strcmp(current->argvalue, "d") == 0) //-type f -> retorna 1;
+      {
+          return 1;
+      }
+
+      if (strcmp(current->argvalue,"f") == 0) // -type d -> retorna 2;
+      {
+
+        return 2;
+      }
+    }
+    current = current->nextarg;
+  }
+  return 0;
+}
+
+int find_byempty(char *base_path)
+{
+  
+   DIR *dir;
+  struct dirent *entry;
+  struct stat file_stat;
+  char *path = malloc(sizeof(char) * 300);
+  int count=0;
+  if ((dir = opendir(base_path)) == NULL)
+    return 0;
+  else
+  {
+  
+    while ((entry = readdir(dir)) != NULL)
+    {
+    
+
+      sprintf(path, "%s%s", base_path, entry->d_name);
+
+      if (stat(path, &file_stat) == 0)
+      {
+          continue;
+      }
+      else
+      {
+         count ++;
+      }
+      
+
+      strcpy(path, "");
+    }
+
+    closedir(dir);
+  }
+  if(count==2) //Se count == 2 (por causa do . e  ..) significa que o diretorio está vazio.
+  {
+   
+    return 1;
+  }
+  
+  return 0;
+}
+
+int nodecount(struct argcmd *head) //funcao para contar as especificações
+{
+int count=0;
+
+struct argcmd *current = head;
+
+  while (current != NULL)
+  {
+//printf("%s->%s\n",current->arg, current->argvalue);
+  count ++;
+  current = current->nextarg;
+  }
+
+return count;
+}
+
+
+void inserthreads(struct threadmatch **head, struct threadmatch *no,long int id,char *path)
+{
+  //printf("%s\n",path);
+   struct threadmatch *node=no;
+   if(node==NULL)                                                                                       //Se a lista tiver vazio, coloca a primeira thread
+   {
+     struct threadmatch *new_node = (struct threadmatch *)malloc(sizeof(struct threadmatch));
+
+  new_node->thread_id=id;
+  new_node->matches=1;
+  new_node->next = *head;
+  *head = new_node;
+  inserthreadspath(HeadThreds,id,path);     
+
+   }
+    else                                                                    //Se nao tiver vazia
+    { 
+      while(node!=NULL )  
+   {
+     if(node->thread_id==id)                                                  //Percorre a lista para ver se aquela thread ja existe lá
+     {
+    node->matches=(node->matches)+1;                                          //Se existir adiciona +1 ocorrencia
+   inserthreadspath(HeadThreds,id,path);                  
+     return;
+     }
+     node=node->next;
+   }
+   if(node==NULL)
+   {
+     
+  struct threadmatch *new_node = (struct threadmatch *)malloc(sizeof(struct threadmatch));    //Se nao existir é colocada uma nova thread à cabeça.
+  new_node->thread_id=id;
+  new_node->matches=1;
+  new_node->next = *head;
+  *head = new_node;
+   inserthreadspath(HeadThreds,id,path);
+ 
+     
+   }
+    }
+   }
+   
+   void inserthreadspath(struct threadmatch *no,long int id,char *path)
+   {
+    struct strings *new_string = (struct strings *)malloc(sizeof(struct strings));
+   
+  while(no!=NULL)
+    {
+      if(no->thread_id==id){  //Encontra a thread desejada
+
+    new_string->name= malloc(300*sizeof(char)); //Aloca espaço para uma string
+    strcpy(new_string->name,path);              //Coloca a string na lista.
+    
+    new_string->next=no->firstString;
+   
+    no->firstString=new_string;
 
     }
-    int Tam =strlen(string);
-    string[Tam+1]='\0';
-    
-    return string;
-}
-int *stringToarray(int *a, char *string)
-{
-    int i=0;
-    int num;
-    char *token;
-    token = strtok(string,",");
-    while(token!=NULL)
-    {
-        sscanf(token,"%d", &num);
-        a[i]=num;
-        i++;
-        token=strtok(NULL,",");
+    no=no->next; //proxima tarefa
     }
-    return a;
+    
+   }
+   
+void printListArgshelp()
+{
+  int i=0;
+  struct threadmatch *node=HeadThreds;
+  while (node != NULL)
+  {
+    
+    int counter=0;
+     printf("TID:%ld\nMatchs:%d\n", node->thread_id, node->matches);    //Imprime id e counter
+    globalMatchs=node->matches+globalMatchs;
+    struct strings *node_string = node->firstString;        //Apontador para a lista ligada dentro da lista
+    
+for(int i=0; i<node->matches;i++)           //Percorre todos os caminhos encontrados pela thread
+{
+printf("%s\n",node_string->name);         //Imprime
+node_string=node_string->next;
 }
+      node = node->next;
+      printf("\n");
+    }
+    printf("Global Matchs : %d\n",globalMatchs);
+    }
+   
+  
+
