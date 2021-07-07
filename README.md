@@ -1,6 +1,10 @@
 # SO
 ## Operating Systems Class  - Project
 
+Project carried out for the Operating Systems course that aims to use the UNIX programming language.
+There were several tools such as:
+processes, threads, pipes, sockets, etc.
+
 ###### This project uses UNIX C programming language
 
 ###### First Phase : This project uses processes and splits an array so every child process can sort the array.
